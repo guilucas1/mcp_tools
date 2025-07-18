@@ -1,23 +1,83 @@
 name: claude-mcp-servers
 
+# Custom network for service isolation
+networks:
+  mcp-network:
+    driver: bridge
+
 services:
   basic-memory:
     image: ghcr.io/basicmachines-co/basic-memory:latest
     container_name: claude-basic-memory
     restart: unless-stopped
+    
+    # Resource limits (safe optimization)
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+    
     volumes:
       - "./database:/app/data"
       - "./config:/root/.basic-memory"
+    
+    networks:
+      - mcp-network
+    
     ports:
       - "8888:8000"
-
-  think-mcp:
-    build: .
-    container_name: claude-think-mcp
-    restart: unless-stopped
-    volumes:
-      - "./data:/app/data"
-    ports:
-      - "8001:8000"
+    
     environment:
       - PYTHONUNBUFFERED=1
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  think-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    
+    container_name: claude-think-mcp
+    restart: unless-stopped
+    
+    depends_on:
+      - basic-memory
+    
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+    
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    
+    volumes:
+      - "./data:/app/data"
+    
+    networks:
+      - mcp-network
+    
+    ports:
+      - "8001:8000"
+    
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+      # Use /tmp for UV cache (app user can write here)
+      - UV_CACHE_DIR=/tmp/uv-cache
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

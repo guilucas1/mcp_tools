@@ -1,0 +1,191 @@
+# ============================================
+# Git and Version Control
+# ============================================
+.git
+.gitignore
+.gitattributes
+.gitmodules
+
+# ============================================
+# Docker Files (avoid recursion)
+# ============================================
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# ============================================
+# Documentation and README files
+# ============================================
+README.md
+README.rst
+README.txt
+CHANGELOG.md
+CHANGELOG.rst
+CHANGELOG.txt
+LICENSE
+LICENSE.md
+LICENSE.txt
+CONTRIBUTING.md
+docs/
+*.md
+
+# ============================================
+# Development and IDE Files
+# ============================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ============================================
+# Python Development Files
+# ============================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.env
+.env.local
+.env.*.local
+
+# Python distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# ============================================
+# Local Data and Logs
+# ============================================
+logs/
+*.log
+log/
+temp/
+tmp/
+cache/
+.cache/
+
+# Local database files
+*.db
+*.sqlite
+*.sqlite3
+
+# ============================================
+# Node.js (in case of mixed projects)
+# ============================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.eslintcache
+
+# ============================================
+# Security and Secrets
+# ============================================
+*.pem
+*.key
+*.p12
+*.p8
+*.cer
+*.crt
+secrets/
+.secrets
+.env.production
+.env.staging
+config/secrets.yml
+
+# ============================================
+# Build and Deployment Files
+# ============================================
+Makefile
+*.make
+.travis.yml
+.github/
+.gitlab-ci.yml
+.circleci/
+.jenkins/
+.drone.yml
+terraform/
+ansible/
+k8s/
+kubernetes/
+
+# ============================================
+# Backup and Archive Files
+# ============================================
+*.bak
+*.backup
+*.old
+*.orig
+*.save
+*.tmp
+*.tar
+*.tar.gz
+*.zip
+*.rar
+
+# ============================================
+# Project Specific Exclusions
+# ============================================
+# Exclude database directory to avoid copying local data
+database/
+# Exclude config if it contains sensitive data
+# config/
+
+# Local development data
+data/test/
+data/dev/
+data/local/
+
+# Scripts that shouldn't be in container
+setup.sh
+validate.sh
+install.sh
+deploy.sh
+
+# Monitoring and profiling
+.profile
+*.prof
+*.pprof
