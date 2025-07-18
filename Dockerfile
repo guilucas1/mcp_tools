@@ -1,24 +1,61 @@
-# syntax=docker/dockerfile:1
-FROM python:3.12-slim-bookworm AS base
+# ============================================
+# Build Stage - Contains build tools and cache
+# ============================================
+FROM python:3.12-slim-bookworm AS builder
 
-# Install uv for fast Python package management
-COPY --from=ghcr.io/astral-sh/uv:0.5.9 /uv /uvx /bin/
 
-# Create app user for security
-RUN useradd --create-home --shell /bin/bash app
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        curl \
+        build-essential && \
+    rm -rf /var/lib/apt/lists/*
 
-# Set up working directory
+
+COPY --from=ghcr.io/astral-sh/uv:0.5.9 /uv /uvx /usr/local/bin/
+
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    VIRTUAL_ENV=/opt/venv
+RUN uv venv $VIRTUAL_ENV
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install think-mcp
+
+# ============================================
+# Runtime Stage
+# ============================================
+FROM python:3.12-slim-bookworm AS runtime
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        curl && \
+    rm -rf /var/lib/apt/lists/* && \
+    apt-get clean
+
+RUN groupadd --gid 1001 app && \
+    useradd --uid 1001 --gid app --shell /bin/bash --create-home app
+
+COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /usr/local/bin/uv /usr/local/bin/uvx /usr/local/bin/
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    VIRTUAL_ENV=/opt/venv \
+    PATH="/opt/venv/bin:/usr/local/bin:$PATH"
+
 WORKDIR /app
 
-# Create directory for persistent data
-RUN mkdir -p /app/data && chown app:app /app/data
+RUN mkdir -p /app/data && chown -R app:app /app
 
-# Switch to non-root user
 USER app
 
-# Expose port for potential future web interface
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD ["python", "-c", "import sys; sys.exit(0)"]
+
 EXPOSE 8000
 
-# Keep container running - don't start think-mcp automatically
-# Claude Desktop will invoke it via: docker exec -i container-name uvx think-mcp
 CMD ["sleep", "infinity"]
