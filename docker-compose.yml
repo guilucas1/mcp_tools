@@ -81,3 +81,52 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+        
+  thread-continuity:
+    build:
+      context: .
+      dockerfile: Dockerfile.thread-continuity
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+    
+    container_name: claude-thread-continuity
+    restart: unless-stopped
+    
+    # Isolated container - no dependencies on other services
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; import mcp; print(f'MCP version: {mcp.__version__}', flush=True) or sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    
+    volumes:
+      - "./data/thread-continuity:/app/data"
+    
+    networks:
+      - mcp-network
+    
+    ports:
+      - "8002:8000"
+    
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+      # Use /tmp for UV cache (app user can write here)
+      - UV_CACHE_DIR=/tmp/uv-cache
+      - TZ=UTC
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
