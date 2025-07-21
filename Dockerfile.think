@@ -1,0 +1,97 @@
+FROM python:3.12-slim-bookworm AS builder
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        curl \
+        build-essential && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:0.5.9 /uv /uvx /usr/local/bin/
+
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    VIRTUAL_ENV=/opt/venv
+
+RUN uv venv $VIRTUAL_ENV
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install think-mcp fastapi uvicorn
+
+FROM python:3.12-slim-bookworm AS runtime
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && \
+    apt-get install -y --no-install-recommends curl tini && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --gid 1001 app && \
+    useradd --uid 1001 --gid app --shell /bin/bash --create-home app
+
+COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /usr/local/bin/uv /usr/local/bin/uvx /usr/local/bin/
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONOPTIMIZE=1 \
+    VIRTUAL_ENV=/opt/venv \
+    PATH="/opt/venv/bin:/usr/local/bin:$PATH"
+
+WORKDIR /app
+
+RUN mkdir -p /app/data && chown -R app:app /app
+
+# Create HTTP wrapper for MCP server
+COPY --chown=app:app --chmod=755 <<"EOF" /app/mcp_http_wrapper.py
+#!/usr/bin/env python3
+import asyncio
+import json
+import subprocess
+import uvicorn
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
+
+app = FastAPI(title="Think MCP HTTP Wrapper")
+
+@app.get("/health")
+async def health():
+    return {"status": "healthy", "service": "think-mcp"}
+
+@app.post("/think")
+async def think_endpoint(request: dict):
+    try:
+        # Start think-mcp as subprocess and communicate via stdio
+        process = subprocess.Popen(
+            ["python", "-m", "think_mcp"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        
+        # Send MCP request
+        mcp_request = json.dumps(request)
+        stdout, stderr = process.communicate(input=mcp_request)
+        
+        if process.returncode != 0:
+            raise HTTPException(status_code=500, detail=f"MCP Error: {stderr}")
+            
+        return json.loads(stdout)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8001)
+EOF
+
+USER app
+
+HEALTHCHECK --interval=60s --timeout=3s --start-period=10s --retries=2 \
+    CMD ["curl", "-f", "http://localhost:8001/health", "||", "exit", "1"]
+
+EXPOSE 8001
+
+ENTRYPOINT ["tini", "--"]
+CMD ["python", "/app/mcp_http_wrapper.py"]

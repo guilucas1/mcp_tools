@@ -1,6 +1,3 @@
-# ============================================
-# Build Stage - Contains build tools and cache
-# ============================================
 FROM python:3.12-slim-bookworm AS builder
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -16,23 +13,19 @@ COPY --from=ghcr.io/astral-sh/uv:0.5.9 /uv /uvx /usr/local/bin/
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     VIRTUAL_ENV=/opt/venv
+
 RUN uv venv $VIRTUAL_ENV
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install mcp-server-calculator
+    uv pip install mcp-server-calculator fastapi uvicorn
 
-# ============================================
-# Runtime Stage
-# ============================================
 FROM python:3.12-slim-bookworm AS runtime
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && \
-    apt-get install -y --no-install-recommends \
-        curl && \
-    rm -rf /var/lib/apt/lists/* && \
-    apt-get clean
+    apt-get install -y --no-install-recommends tini && \
+    rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --gid 1001 app && \
     useradd --uid 1001 --gid app --shell /bin/bash --create-home app
@@ -42,16 +35,57 @@ COPY --from=builder /usr/local/bin/uv /usr/local/bin/uvx /usr/local/bin/
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONOPTIMIZE=1 \
     VIRTUAL_ENV=/opt/venv \
     PATH="/opt/venv/bin:/usr/local/bin:$PATH"
 
 WORKDIR /app
 
+# Create simple HTTP wrapper for calculator
+COPY --chown=app:app --chmod=755 <<"EOF" /app/calculator_http.py
+#!/usr/bin/env python3
+import uvicorn
+from fastapi import FastAPI
+
+app = FastAPI(title="Calculator MCP HTTP")
+
+@app.get("/health")
+async def health():
+    return {"status": "healthy", "service": "calculator"}
+
+@app.post("/calculate")
+async def calculate(expression: dict):
+    try:
+        # Simple calculator logic
+        if expression.get("operation") == "add":
+            result = expression["a"] + expression["b"]
+        elif expression.get("operation") == "subtract":
+            result = expression["a"] - expression["b"]
+        elif expression.get("operation") == "multiply":
+            result = expression["a"] * expression["b"]
+        elif expression.get("operation") == "divide":
+            if expression["b"] == 0:
+                return {"error": "Division by zero"}
+            result = expression["a"] / expression["b"]
+        else:
+            return {"error": "Unknown operation"}
+        
+        return {"result": result}
+    except Exception as e:
+        return {"error": str(e)}
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8002)
+EOF
+
+RUN chown -R app:app /app
+
 USER app
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD ["python", "-c", "import mcp_server_calculator; import sys; sys.exit(0)"]
+HEALTHCHECK --interval=90s --timeout=3s --start-period=8s --retries=2 \
+    CMD ["python", "-c", "import requests; requests.get('http://localhost:8002/health', timeout=2)"]
 
-EXPOSE 8000
+EXPOSE 8002
 
-CMD ["sleep", "infinity"]
+ENTRYPOINT ["tini", "--"]
+CMD ["python", "/app/calculator_http.py"]

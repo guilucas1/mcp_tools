@@ -1,22 +1,24 @@
 name: claude-mcp-servers
 
-# Custom network for service isolation
 networks:
   mcp-network:
     driver: bridge
 
 services:
+  # Basic Memory - Simple always-on container for Claude Desktop
   basic-memory:
     image: ghcr.io/basicmachines-co/basic-memory:latest
     container_name: claude-basic-memory
     restart: unless-stopped
     
-    # Resource limits (safe optimization)
     deploy:
       resources:
         limits:
           cpus: '1.0'
           memory: 512M
+        reservations:
+          cpus: '0.2'
+          memory: 128M
     
     volumes:
       - "./database:/app/data"
@@ -30,29 +32,7 @@ services:
     
     environment:
       - PYTHONUNBUFFERED=1
-    
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  think-mcp:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    
-    container_name: claude-think-mcp
-    restart: unless-stopped
-    
-    depends_on:
-      - basic-memory
-    
-    deploy:
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 1G
+      - PYTHONDONTWRITEBYTECODE=1
     
     healthcheck:
       test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
@@ -61,64 +41,151 @@ services:
       retries: 3
       start_period: 30s
     
-    volumes:
-      - "./data:/app/data"
-    
-    networks:
-      - mcp-network
-    
-    ports:
-      - "8001:8000"
-    
-    environment:
-      - PYTHONUNBUFFERED=1
-      - PYTHONDONTWRITEBYTECODE=1
-      # Use /tmp for UV cache (app user can write here)
-      - UV_CACHE_DIR=/tmp/uv-cache
-    
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
 
+  # Lazytainer - Only manages think-mcp and calculator
+  lazytainer:
+    image: ghcr.io/vmorganp/lazytainer:latest
+    container_name: claude-lazytainer
+    restart: unless-stopped
+    
+    deploy:
+      resources:
+        limits:
+          cpus: '0.2'
+          memory: 64M
+        reservations:
+          cpus: '0.1'
+          memory: 32M
+    
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    
+    networks:
+      - mcp-network
+    
+    ports:
+      - "8001:8001"  # Think MCP proxy
+      - "8002:8002"  # Calculator proxy
+    
+    environment:
+      - VERBOSE=true
+      - TZ=UTC
+    
+    labels:
+      # Think MCP group configuration
+      - "lazytainer.group.think-mcp.ports=8001"
+      - "lazytainer.group.think-mcp.sleepMethod=pause"
+      - "lazytainer.group.think-mcp.minPacketThreshold=1"
+      - "lazytainer.group.think-mcp.inactiveTimeout=300"
+      - "lazytainer.group.think-mcp.pollRate=1"
+      
+      # Calculator group configuration
+      - "lazytainer.group.calculator.ports=8002"
+      - "lazytainer.group.calculator.sleepMethod=pause"
+      - "lazytainer.group.calculator.minPacketThreshold=1"
+      - "lazytainer.group.calculator.inactiveTimeout=180"
+      - "lazytainer.group.calculator.pollRate=1"
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  # Think MCP - Optimized with Lazytainer
+  think-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.think
+    
+    container_name: claude-think-mcp
+    restart: "no"
+    
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.3'
+          memory: 128M
+    
+    volumes:
+      - "./data:/app/data"
+    
+    # Share network with Lazytainer
+    network_mode: service:lazytainer
+    
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONOPTIMIZE=1
+    
+    labels:
+      - "lazytainer.group=think-mcp"
+    
+    depends_on:
+      - lazytainer
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health", "||", "exit", "1"]
+      interval: 60s
+      timeout: 3s
+      retries: 2
+      start_period: 10s
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  # Calculator - Optimized with Lazytainer
   calculator:
     build:
       context: .
       dockerfile: Dockerfile.calculator
     
     container_name: claude-calculator
-    restart: unless-stopped
-    
-    depends_on:
-      - basic-memory
+    restart: "no"
     
     deploy:
       resources:
         limits:
-          cpus: '0.5'
-          memory: 256M
+          cpus: '0.3'
+          memory: 128M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
     
-    healthcheck:
-      test: ["CMD", "python", "-c", "import mcp_server_calculator; import sys; sys.exit(0)"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-    
-    networks:
-      - mcp-network
-    
-    ports:
-      - "8002:8000"
+    # Share network with Lazytainer
+    network_mode: service:lazytainer
     
     environment:
       - PYTHONUNBUFFERED=1
       - PYTHONDONTWRITEBYTECODE=1
-      - UV_CACHE_DIR=/tmp/uv-cache
+      - PYTHONOPTIMIZE=1
+    
+    labels:
+      - "lazytainer.group=calculator"
+    
+    depends_on:
+      - lazytainer
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health", "||", "exit", "1"]
+      interval: 90s
+      timeout: 3s
+      retries: 2
+      start_period: 8s
     
     logging:
       driver: "json-file"
       options:
-        max-size: "10m"
-        max-file: "3"
+        max-size: "5m"
+        max-file: "2"
