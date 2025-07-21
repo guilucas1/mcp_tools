@@ -81,3 +81,44 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+  calculator:
+    build:
+      context: .
+      dockerfile: Dockerfile.calculator
+    
+    container_name: claude-calculator
+    restart: unless-stopped
+    
+    depends_on:
+      - basic-memory
+    
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+    
+    healthcheck:
+      test: ["CMD", "python", "-c", "import mcp_server_calculator; import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    
+    networks:
+      - mcp-network
+    
+    ports:
+      - "8002:8000"
+    
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+      - UV_CACHE_DIR=/tmp/uv-cache
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
