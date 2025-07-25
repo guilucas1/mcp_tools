@@ -68,7 +68,7 @@ services:
       - mcp-network
     
     ports:
-      - "8001:8000"
+      - "8004:8000"
     
     environment:
       - PYTHONUNBUFFERED=1
@@ -116,6 +116,54 @@ services:
       - PYTHONUNBUFFERED=1
       - PYTHONDONTWRITEBYTECODE=1
       - UV_CACHE_DIR=/tmp/uv-cache
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        
+  minima:
+    build:
+      context: .
+      dockerfile: Dockerfile.minima
+    
+    container_name: claude-minima
+    restart: unless-stopped
+    
+    depends_on:
+      - basic-memory
+    
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+    
+    healthcheck:
+      test: ["CMD", "ps", "aux", "|", "grep", "-q", "minima", "||", "exit", "1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    
+    volumes:
+      - "./data:/app/data:rw"
+      - "${LOCAL_FILES_PATH:-./documents}:/app/documents:rw"
+    
+    networks:
+      - mcp-network
+    
+    ports:
+      - "8003:8000"  # MCP server port
+      - "8001:8001"  # Indexer port
+    
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+      - LOCAL_FILES_PATH=/app/documents
+      - EMBEDDING_MODEL_ID=sentence-transformers/all-mpnet-base-v2
+      - EMBEDDING_SIZE=768
     
     logging:
       driver: "json-file"
